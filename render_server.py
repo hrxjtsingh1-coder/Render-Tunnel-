@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 # ========== CONFIGURATION ==========
 # Your Cloudflare Tunnel URL (NO trailing slash for urljoin to work correctly)
-PHONE_TUNNEL_BASE_URL = "http://phone.coachsaab.online"
+PHONE_TUNNEL_BASE_URL = "https://phone.coachsaab.online"
 
 # Test YouTube Shorts URL (CHANGE THIS to your actual test video)
 TEST_YT_SHORTS_URL = "https://www.youtube.com/shorts/VIDEO_ID_HERE"
