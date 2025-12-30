@@ -1,132 +1,126 @@
-# render_server.py - Updated for Cloudflare Tunnel
+# render_server.py - CORRECTED FOR CLOUDFLARE TUNNEL
 from flask import Flask, request, Response
 import urllib3
 import os
 import json
+from urllib.parse import urljoin
 
 app = Flask(__name__)
 
 # ========== CONFIGURATION ==========
-# Your permanent Cloudflare Tunnel URL
-PHONE_TUNNEL_URL = "http://phone.coachsaab.online"  # Your tunnel URL
+# Your Cloudflare Tunnel URL (NO trailing slash for urljoin to work correctly)
+PHONE_TUNNEL_BASE_URL = "http://phone.coachsaab.online"
 
-# YouTube target (for direct testing)
-YT_SHORTS_URL = "https://youtube.com/shorts/XX8x7visJTQ?si=ZQt04Nft-JFslSEI"  # CHANGE THIS
+# Test YouTube Shorts URL (CHANGE THIS to your actual test video)
+TEST_YT_SHORTS_URL = "https://www.youtube.com/shorts/VIDEO_ID_HERE"
 # ===================================
 
-# Create a session with connection pooling
-http = urllib3.PoolManager(timeout=urllib3.Timeout(connect=5.0, read=15.0))
+# Create HTTP connection pool
+http = urllib3.PoolManager(
+    timeout=urllib3.Timeout(connect=5.0, read=15.0),
+    retries=urllib3.Retry(3, redirect=2)
+)
+
+def make_tunnel_request(url_path):
+    """Make a request through the Cloudflare Tunnel."""
+    # Construct full URL
+    full_url = urljoin(PHONE_TUNNEL_BASE_URL + '/', url_path.lstrip('/'))
+    
+    try:
+        response = http.request(
+            'GET',
+            full_url,
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        )
+        return response
+    except Exception as e:
+        raise Exception(f"Tunnel request failed: {str(e)}")
 
 @app.route('/')
 def home():
-    """Simple home page to test if server is running."""
     return """
-    <h1>Render Proxy Bridge</h1>
-    <p>Status: <strong>Active</strong></p>
-    <p>Tunnel URL: {}</p>
+    <h1>📡 Render Proxy Bridge - ACTIVE</h1>
+    <p>Tunnel URL: <code>{}</code></p>
     <p>Test endpoints:</p>
     <ul>
-        <li><a href="/status">/status</a> - Check server status</li>
-        <li><a href="/test">/test</a> - Test tunnel connection</li>
-        <li><a href="/view">/view</a> - Test YouTube view (via tunnel)</li>
+        <li><a href="/status">/status</a> - Server & tunnel status</li>
+        <li><a href="/test/ip">/test/ip</a> - Show your phone's IP</li>
+        <li><a href="/test/yt">/test/yt</a> - Test YouTube connection</li>
+        <li><a href="/proxy/https://httpbin.org/ip">/proxy/https://httpbin.org/ip</a> - Proxy test</li>
     </ul>
-    """.format(PHONE_TUNNEL_URL)
+    """.format(PHONE_TUNNEL_BASE_URL)
 
 @app.route('/status')
 def status():
-    """Check if server and tunnel are running."""
+    """Check server and tunnel status."""
+    tunnel_active = False
     try:
-        # Test if tunnel is responsive
-        test_response = http.request('GET', PHONE_TUNNEL_URL, timeout=5.0)
-        tunnel_status = test_response.status == 200
-    except Exception:
-        tunnel_status = False
+        # Quick ping to tunnel
+        resp = http.request('GET', PHONE_TUNNEL_BASE_URL, timeout=3.0)
+        tunnel_active = resp.status in [200, 404, 502]  # Any response means tunnel is reachable
+    except:
+        pass
     
     return {
-        "status": "Render Bridge Active",
-        "tunnel_url": PHONE_TUNNEL_URL,
-        "tunnel_active": tunnel_status,
-        "timestamp": os.popen('date').read().strip()
+        "server": "active",
+        "timestamp": os.popen('date').read().strip(),
+        "tunnel": {
+            "url": PHONE_TUNNEL_BASE_URL,
+            "active": tunnel_active,
+            "note": "true means tunnel is reachable (may return error page)"
+        }
     }
 
-@app.route('/test')
-def test_tunnel():
-    """Test the tunnel connection by fetching IP."""
+@app.route('/test/ip')
+def test_ip():
+    """Test tunnel by getting phone's IP address."""
     try:
-        # Request through your phone tunnel
-        response = http.request('GET', f'{PHONE_TUNNEL_URL}/httpbin.org/ip', timeout=10.0)
-        
+        response = make_tunnel_request('httpbin.org/ip')
         if response.status == 200:
             data = json.loads(response.data.decode('utf-8'))
             return {
                 "success": True,
-                "message": "Tunnel is working!",
+                "message": "✅ Tunnel is working!",
                 "your_phone_ip": data.get('origin', 'Unknown'),
-                "via": PHONE_TUNNEL_URL
+                "via_tunnel": PHONE_TUNNEL_BASE_URL
             }
-        else:
-            return {"success": False, "error": f"Tunnel returned status {response.status}"}
-            
+        return {"success": False, "error": f"HTTP {response.status}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-@app.route('/view')
-def test_youtube_view():
-    """Test a YouTube view through the tunnel."""
+@app.route('/test/yt')
+def test_youtube():
+    """Test YouTube connection through tunnel."""
     try:
-        # Construct the full YouTube URL
-        yt_url = YT_SHORTS_URL
+        response = make_tunnel_request(TEST_YT_SHORTS_URL)
+        html = response.data.decode('utf-8', errors='ignore')[:500]  # First 500 chars
         
-        # Make request through tunnel
-        response = http.request('GET', f'{PHONE_TUNNEL_URL}/{yt_url}', timeout=20.0)
+        is_youtube = 'youtube' in html.lower() or 'YouTube' in html
         
-        # Check if we got a YouTube page
-        html = response.data.decode('utf-8', errors='ignore')
-        
-        if "YouTube" in html or "youtube" in html:
-            return {
-                "success": True,
-                "message": "YouTube page loaded successfully through tunnel!",
-                "status_code": response.status,
-                "content_length": len(html),
-                "note": "Check YouTube Studio analytics in 15-30 minutes for the view."
-            }
-        else:
-            return {
-                "success": False,
-                "message": "Loaded but doesn't look like YouTube",
-                "status_code": response.status,
-                "preview": html[:200] + "..."
-            }
-            
+        return {
+            "success": True,
+            "youtube_detected": is_youtube,
+            "status_code": response.status,
+            "preview": html,
+            "note": "If youtube_detected is true, tunnel can access YouTube"
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-@app.route('/proxy/<path:url>', methods=['GET'])
-def proxy_to_phone(url):
-    """Proxy endpoint for Colab bot."""
+@app.route('/proxy/<path:target_url>')
+def proxy_request(target_url):
+    """Main proxy endpoint for Colab bot."""
     try:
         # Ensure URL has protocol
-        if not url.startswith('http'):
-            url = 'https://' + url
+        if not target_url.startswith(('http://', 'https://')):
+            target_url = 'https://' + target_url
         
-        # Forward request through Cloudflare Tunnel
-        full_url = f'{PHONE_TUNNEL_URL}/{url}'
+        # Forward request through tunnel
+        response = make_tunnel_request(target_url)
         
-        # Forward headers (remove Host to avoid conflicts)
-        headers = dict(request.headers)
-        if 'Host' in headers:
-            del headers['Host']
-        
-        # Make the request
-        response = http.request(
-            'GET',
-            full_url,
-            headers=headers,
-            timeout=urllib3.Timeout(connect=10.0, read=30.0)
-        )
-        
-        # Return the response
+        # Return response to client
         return Response(
             response.data,
             status=response.status,
@@ -134,22 +128,15 @@ def proxy_to_phone(url):
         )
         
     except Exception as e:
-        return f"Proxy Error: {str(e)}", 500
-
-@app.route('/direct/<path:subpath>', methods=['GET'])
-def direct_tunnel(subpath):
-    """Direct access to any URL through tunnel."""
-    try:
-        target_url = f'{PHONE_TUNNEL_URL}/{subpath}'
-        response = http.request('GET', target_url, timeout=15.0)
-        return Response(response.data, status=response.status, headers=dict(response.headers))
-    except Exception as e:
-        return f"Direct access error: {str(e)}", 500
+        return Response(
+            json.dumps({"error": "Proxy failed", "details": str(e)}),
+            status=500,
+            mimetype='application/json'
+        )
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     print(f"🚀 Server starting on port {port}")
-    print(f"🔗 Tunnel URL: {PHONE_TUNNEL_URL}")
-    print(f"🎯 YouTube target: {YT_SHORTS_URL}")
-    print(f"📊 Status page: http://localhost:{port}/status")
+    print(f"🔗 Cloudflare Tunnel: {PHONE_TUNNEL_BASE_URL}")
+    print(f"📺 Test YouTube: {TEST_YT_SHORTS_URL}")
     app.run(host='0.0.0.0', port=port)
