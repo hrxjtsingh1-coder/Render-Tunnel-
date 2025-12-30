@@ -11,7 +11,7 @@ app = Flask(__name__)
 PHONE_TUNNEL_URL = "http://phone.coachsaab.online"  # Your tunnel URL
 
 # YouTube target (for direct testing)
-YT_SHORTS_URL = "https://www.youtube.com/shorts/YOUR_VIDEO_ID_HERE"  # CHANGE THIS
+YT_SHORTS_URL = "https://youtube.com/shorts/XX8x7visJTQ?si=ZQt04Nft-JFslSEI"  # CHANGE THIS
 # ===================================
 
 # Create a session with connection pooling
